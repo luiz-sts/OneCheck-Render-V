@@ -1,9 +1,0 @@
-services:
-  - type: web
-    name: onecheck
-    env: docker
-    plan: free
-    dockerfilePath: ./Dockerfile
-    envVars:
-      - key: PHP_ENV
-        value: production
