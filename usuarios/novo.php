@@ -1,95 +1,82 @@
 <?php
+
 declare(strict_types=1);
+
 require_once dirname(__DIR__) . '/includes/bootstrap.php';
-require_once dirname(__DIR__) . '/config/api.php';
-require_once dirname(__DIR__) . '/includes/auth_api.php';
-api_require_login();
+Auth::requireRole('admin');
 
 $erro = '';
+$perfis = ['admin', 'gestor', 'vistoriador', 'visualizador', 'locatario'];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $nome  = trim($_POST['nome']  ?? '');
-    $email = trim($_POST['email'] ?? '');
-    $senha = trim($_POST['senha'] ?? '');
-    $role  = trim($_POST['role']  ?? '');
-    $cpf   = preg_replace('/\D/', '', $_POST['cpf'] ?? '');
+    $nome = post_str('nome');
+    $email = post_str('email');
+    $senha = $_POST['senha'] ?? '';
+    $perfil = $_POST['perfil'] ?? 'vistoriador';
+    $mfaObr = isset($_POST['mfa_obrigatorio']) ? 1 : 0;
 
-    if (!$nome || !$email || !$senha || !$role) {
-        $erro = 'Nome, e-mail, senha e perfil são obrigatórios.';
-    } elseif (strlen($senha) < 6) {
-        $erro = 'A senha deve ter pelo menos 6 caracteres.';
+    if (!in_array($perfil, $perfis, true)) {
+        $erro = 'Perfil inválido.';
+    } elseif ($nome === '' || $email === '' || strlen($senha) < 6) {
+        $erro = 'Nome, e-mail e senha (mín. 6 caracteres) são obrigatórios.';
     } else {
-        $payload = ['nome' => $nome, 'email' => $email, 'senha' => $senha, 'role' => $role];
-        if ($cpf !== '') $payload['cpf'] = $cpf;
-
-        $res = ApiClient::post('/usuarios', $payload);
-
-        if (!empty($res['sucesso'])) {
+        if (Mfa::isMandatoryForProfile($perfil)) {
+            $mfaObr = 1;
+        }
+        try {
+            Database::pdo()->prepare(
+                'INSERT INTO usuarios (uuid, nome, email, senha_hash, perfil, mfa_obrigatorio)
+                 VALUES (UUID(), ?, ?, ?, ?, ?)'
+            )->execute([$nome, $email, password_hash($senha, PASSWORD_DEFAULT), $perfil, $mfaObr]);
+            $id = (int) Database::pdo()->lastInsertId();
+            AuditLog::record('create', 'usuarios', (string) $id, null, ['email' => $email, 'perfil' => $perfil]);
+            flash_set('success', 'Usuário criado.');
             redirect(base_url('usuarios/index.php'));
-        } else {
-            $erro = $res['erro'] ?? 'Erro ao cadastrar usuário.';
+        } catch (PDOException $e) {
+            $erro = 'E-mail já cadastrado.';
         }
     }
 }
 
-$pageTitle  = 'Novo usuário';
+$pageTitle = 'Novo usuário';
 $activeMenu = 'usuarios';
 require ONECHECK_ROOT . '/includes/header.php';
+page_header('Novo usuário', '', '<a href="' . e(base_url('usuarios/index.php')) . '" class="btn btn-link btn-sm">Voltar</a>');
 ?>
 
-<div class="d-flex justify-content-between align-items-start mb-4">
-    <div class="oc-page-header mb-0">
-        <h2>Novo usuário</h2>
-        <p>Cadastre um novo acesso ao sistema</p>
-    </div>
-    <a href="<?= e(base_url('usuarios/index.php')) ?>" class="btn btn-outline-secondary btn-sm">
-        <i class="bi bi-arrow-left me-1"></i>Voltar
-    </a>
-</div>
+<?php if ($erro): ?><div class="alert alert-danger"><?= e($erro) ?></div><?php endif; ?>
 
-<?php if ($erro): ?>
-<div class="alert alert-danger mb-3"><i class="bi bi-exclamation-triangle me-2"></i><?= e($erro) ?></div>
-<?php endif; ?>
-
-<div class="card">
+<div class="card border-0 shadow-sm">
     <div class="card-body">
-        <form method="post" autocomplete="off">
-            <div class="row g-3">
-                <div class="col-md-6">
-                    <label class="form-label">Nome completo <span style="color:#f87171">*</span></label>
-                    <input type="text" name="nome" class="form-control" required
-                           placeholder="João da Silva" value="<?= e($_POST['nome'] ?? '') ?>">
-                </div>
-                <div class="col-md-6">
-                    <label class="form-label">E-mail <span style="color:#f87171">*</span></label>
-                    <input type="email" name="email" class="form-control" required
-                           placeholder="joao@email.com" value="<?= e($_POST['email'] ?? '') ?>">
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label">Senha <span style="color:#f87171">*</span></label>
-                    <input type="password" name="senha" class="form-control" required
-                           placeholder="Mínimo 6 caracteres">
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label">Perfil <span style="color:#f87171">*</span></label>
-                    <select name="role" class="form-select" required>
-                        <option value="">Selecione...</option>
-                        <option value="admin"       <?= ($_POST['role'] ?? '')==='admin'       ? 'selected':'' ?>>Administrador</option>
-                        <option value="vistoriador" <?= ($_POST['role'] ?? '')==='vistoriador' ? 'selected':'' ?>>Vistoriador</option>
-                        <option value="locatario"   <?= ($_POST['role'] ?? '')==='locatario'   ? 'selected':'' ?>>Locatário</option>
-                    </select>
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label">CPF</label>
-                    <input type="text" name="cpf" class="form-control"
-                           placeholder="000.000.000-00" maxlength="14" value="<?= e($_POST['cpf'] ?? '') ?>">
+        <form method="post" class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label">Nome</label>
+                <input name="nome" class="form-control" required>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">E-mail</label>
+                <input type="email" name="email" class="form-control" required>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Senha</label>
+                <input type="password" name="senha" class="form-control" required minlength="6">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Perfil (RF01)</label>
+                <select name="perfil" class="form-select" id="perfil">
+                    <?php foreach ($perfis as $pr): ?>
+                    <option value="<?= e($pr) ?>"><?= e(ucfirst($pr)) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-4 d-flex align-items-end">
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" name="mfa_obrigatorio" id="mfa_obr" checked>
+                    <label class="form-check-label" for="mfa_obr">MFA obrigatório (RNF02)</label>
                 </div>
             </div>
-            <div class="mt-4 d-flex gap-2">
-                <button type="submit" class="btn btn-primary">
-                    <i class="bi bi-check-lg me-1"></i>Cadastrar usuário
-                </button>
-                <a href="<?= e(base_url('usuarios/index.php')) ?>" class="btn btn-outline-secondary">Cancelar</a>
+            <div class="col-12">
+                <button class="btn btn-primary">Criar usuário</button>
             </div>
         </form>
     </div>

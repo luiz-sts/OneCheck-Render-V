@@ -1,99 +1,47 @@
 <?php
-declare(strict_types=1);
-require_once dirname(__DIR__) . '/includes/bootstrap.php';
-require_once dirname(__DIR__) . '/config/api.php';
-require_once dirname(__DIR__) . '/includes/auth_api.php';
-api_require_login();
 
-$erro  = '';
-$sucesso = '';
+declare(strict_types=1);
+
+require_once dirname(__DIR__) . '/includes/bootstrap.php';
+Auth::requireLogin();
+
+$erro = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $codigo      = trim($_POST['codigo'] ?? '');
-    $titulo      = trim($_POST['titulo'] ?? '');
-    $tipo        = trim($_POST['tipo']   ?? '');
-    $tamNum      = trim($_POST['tamanho_num'] ?? '');
-    $garagem     = ($_POST['garagem'] ?? 'nenhuma') === 'sim';
-    $vagas       = (int)($_POST['garagem_vagas'] ?? 1);
-    $status      = trim($_POST['status'] ?? 'disponivel');
-    $observacoes = trim($_POST['observacoes'] ?? '');
-
-    if ($tipo === '' || $tamNum === '' || $titulo === '') {
-        $erro = 'Título, tipo e tamanho são obrigatórios.';
-    } else {
-        $resImovel = ApiClient::post('/imoveis', [
-            'codigo'        => $codigo ?: null,
-            'titulo'        => $titulo,
-            'tipo'          => $tipo,
-            'tamanho'       => $tamNum . 'm²',
-            'garagem'       => $garagem,
-            'garagem_vagas' => $vagas,
-            'status'        => $status,
-            'observacoes'   => $observacoes,
-        ]);
-
-        if (!empty($resImovel['sucesso']) && !empty($resImovel['dados']['id'])) {
-            $imovelId = $resImovel['dados']['id'];
-            $rua    = trim($_POST['rua']    ?? '');
-            $numero = trim($_POST['numero'] ?? '');
-            $bairro = trim($_POST['bairro'] ?? '');
-            $cidade = trim($_POST['cidade'] ?? '');
-            $estado = strtoupper(trim($_POST['estado'] ?? ''));
-            $cep    = preg_replace('/\D/', '', $_POST['cep'] ?? '');
-
-            if ($rua !== '' && $cidade !== '' && strlen($estado) === 2) {
-                ApiClient::post('/imoveis/' . $imovelId . '/endereco', [
-                    'rua'         => $rua,
-                    'numero'      => $numero,
-                    'complemento' => trim($_POST['complemento'] ?? ''),
-                    'bairro'      => $bairro,
-                    'cidade'      => $cidade,
-                    'estado'      => $estado,
-                    'cep'         => $cep,
-                ]);
-            }
-            redirect(base_url('imoveis/index.php'));
-        } else {
-            $erro = $resImovel['erro'] ?? ($resImovel['erros'] ? implode(', ', $resImovel['erros']) : 'Erro ao cadastrar imóvel.');
+    $d = ImovelService::parsePostImovel($_POST);
+    $erro = ImovelService::validar($d, true);
+    if (!$erro) {
+        try {
+            $geo = isset($_POST['geocodificar']);
+            $id = ImovelService::criar($d, $geo);
+            flash_set('success', 'Imóvel cadastrado com cômodos padrão.');
+            redirect(base_url('imoveis/detalhes.php?id=' . $id));
+        } catch (PDOException $e) {
+            $erro = 'Não foi possível salvar. Código já existe?';
         }
     }
 }
 
-$pageTitle  = 'Novo imóvel';
+$pageTitle = 'Novo imóvel';
 $activeMenu = 'imoveis';
 require ONECHECK_ROOT . '/includes/header.php';
+page_header('Novo imóvel', 'RF03–RF05 · endereço com geolocalização',
+    '<a href="' . e(base_url('imoveis/index.php')) . '" class="btn btn-link btn-sm">Voltar</a>');
 ?>
 
-<div class="d-flex justify-content-between align-items-start mb-4">
-    <div class="oc-page-header mb-0">
-        <h2>Novo imóvel</h2>
-        <p>Preencha os dados para cadastrar um novo imóvel</p>
-    </div>
-    <a href="<?= e(base_url('imoveis/index.php')) ?>" class="btn btn-outline-secondary btn-sm">
-        <i class="bi bi-arrow-left me-1"></i>Voltar
-    </a>
-</div>
+<?php if ($erro): ?><div class="alert alert-danger"><?= e($erro) ?></div><?php endif; ?>
 
-<?php if ($erro): ?>
-<div class="alert alert-danger mb-3"><i class="bi bi-exclamation-triangle me-2"></i><?= e($erro) ?></div>
-<?php endif; ?>
-
-<div class="card">
+<div class="card border-0 shadow-sm">
     <div class="card-body">
-        <form method="post" autocomplete="off">
-            <?php 
-            $modo = 'novo';
-            require '_form_campos.php'; 
-            ?>
-
-            <div class="mt-4 d-flex gap-2">
-                <button type="submit" class="btn btn-primary">
-                    <i class="bi bi-check-lg me-1"></i>Salvar imóvel
-                </button>
-                <a href="<?= e(base_url('imoveis/index.php')) ?>" class="btn btn-outline-secondary">Cancelar</a>
+        <form method="post" class="imovel-form">
+            <?php require __DIR__ . '/_form_campos.php'; ?>
+            <div class="mt-3">
+                <button class="btn btn-primary">Salvar imóvel</button>
             </div>
         </form>
     </div>
 </div>
 
+<script>document.body.dataset.baseUrl = <?= json_encode(base_url('')) ?>;</script>
+<script src="<?= e(asset_url('js/imoveis-form.js')) ?>"></script>
 <?php require ONECHECK_ROOT . '/includes/footer.php'; ?>

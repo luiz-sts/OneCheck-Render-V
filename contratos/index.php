@@ -1,111 +1,101 @@
 <?php
+
 declare(strict_types=1);
+
 require_once dirname(__DIR__) . '/includes/bootstrap.php';
-require_once dirname(__DIR__) . '/config/api.php';
-require_once dirname(__DIR__) . '/includes/auth_api.php';
-api_require_login();
+Auth::requireLogin();
 
+$pdo = Database::pdo();
 $statusF = $_GET['status'] ?? '';
-$pagina  = max(1, (int)($_GET['pagina'] ?? 1));
+$busca = trim($_GET['q'] ?? '');
 
-$params = ['pagina' => $pagina, 'por_pagina' => 20];
-if ($statusF !== '') $params['status'] = $statusF;
+$sql = 'SELECT c.*, i.codigo AS imovel_codigo, i.titulo AS imovel_titulo
+        FROM contratos c
+        INNER JOIN imoveis i ON i.id = c.imovel_id WHERE 1=1';
+$params = [];
 
-$res       = ApiClient::get('/contratos', $params);
-$contratos = $res['dados'] ?? [];
-$total     = $res['paginacao']['total'] ?? 0;
-$totalPag  = (int) ceil($total / 20);
+if ($statusF !== '') {
+    $sql .= ' AND c.status = ?';
+    $params[] = $statusF;
+}
+if ($busca !== '') {
+    $sql .= ' AND (c.numero LIKE ? OR c.locatario_nome LIKE ? OR i.codigo LIKE ?)';
+    $like = '%' . $busca . '%';
+    $params = array_merge($params, [$like, $like, $like]);
+}
+$sql .= ' ORDER BY c.id DESC';
 
-$pageTitle  = 'Contratos';
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+$contratos = $stmt->fetchAll();
+
+$pageTitle = 'Contratos';
 $activeMenu = 'contratos';
 require ONECHECK_ROOT . '/includes/header.php';
+flash_render();
+page_header('Contratos', 'Locação, anexos e acompanhamento',
+    '<a href="' . e(base_url('contratos/novo.php')) . '" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Novo contrato</a>');
 ?>
 
-<div class="d-flex justify-content-between align-items-start mb-4">
-    <div class="oc-page-header mb-0">
-        <h2>Contratos</h2>
-        <p><?= $total ?> contrato(s) registrado(s)</p>
-    </div>
-    <a href="<?= e(base_url('contratos/novo.php')) ?>" class="btn btn-primary btn-sm">
-        <i class="bi bi-plus-lg me-1"></i>Novo contrato
-    </a>
-</div>
-
-<!-- Filtros -->
-<div class="card mb-3">
+<div class="card border-0 shadow-sm mb-3">
     <div class="card-body py-3">
         <form class="row g-2 align-items-end" method="get">
-            <div class="col-md-4">
-                <label class="form-label">Status</label>
+            <div class="col-md-5">
+                <input type="text" name="q" class="form-control form-control-sm" placeholder="Número, locatário, imóvel..."
+                       value="<?= e($busca) ?>">
+            </div>
+            <div class="col-md-3">
                 <select name="status" class="form-select form-select-sm">
-                    <option value="">Todos</option>
-                    <option value="ativo"     <?= $statusF==='ativo'     ? 'selected':'' ?>>Ativo</option>
-                    <option value="encerrado" <?= $statusF==='encerrado' ? 'selected':'' ?>>Encerrado</option>
-                    <option value="cancelado" <?= $statusF==='cancelado' ? 'selected':'' ?>>Cancelado</option>
+                    <option value="">Todos os status</option>
+                    <?php foreach (['rascunho','ativo','encerrado','cancelado'] as $s): ?>
+                    <option value="<?= e($s) ?>" <?= $statusF === $s ? 'selected' : '' ?>><?= e(ucfirst($s)) ?></option>
+                    <?php endforeach; ?>
                 </select>
             </div>
-            <div class="col-auto">
+            <div class="col-md-4">
                 <button class="btn btn-primary btn-sm">Filtrar</button>
-                <a href="?" class="btn btn-outline-secondary btn-sm ms-1">Limpar</a>
+                <a href="<?= e(base_url('contratos/index.php')) ?>" class="btn btn-outline-secondary btn-sm">Limpar</a>
             </div>
         </form>
     </div>
 </div>
 
-<div class="card">
-    <div class="card-body p-0">
-        <?php if (!$contratos): ?>
-        <div class="p-4" style="color:#6b7fa3;font-size:13px">
-            <i class="bi bi-file-earmark-text me-2"></i>Nenhum contrato registrado na API ainda.
-        </div>
-        <?php else: ?>
-        <table class="table table-hover mb-0">
-            <thead>
+<div class="card border-0 shadow-sm">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
                 <tr>
-                    <th>ID</th>
+                    <th>Número</th>
                     <th>Imóvel</th>
                     <th>Locatário</th>
+                    <th>Valor</th>
                     <th>Início</th>
-                    <th>Fim</th>
                     <th>Status</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
-                <?php foreach ($contratos as $ct): ?>
+                <?php if (!$contratos): ?>
+                <tr><td colspan="7" class="text-center text-muted py-4">Nenhum contrato.</td></tr>
+                <?php else: foreach ($contratos as $c): ?>
                 <tr>
-                    <td style="font-size:11px;color:#6b7fa3"><?= e(substr($ct['id'] ?? '', 0, 8)) ?>...</td>
-                    <td style="font-size:12px"><?= e(substr($ct['imovel_id'] ?? '', 0, 8)) ?>...</td>
-                    <td style="font-size:12px"><?= e(substr($ct['locatario_id'] ?? '', 0, 8)) ?>...</td>
-                    <td><?= e(substr($ct['data_inicio'] ?? '', 0, 10)) ?></td>
-                    <td><?= e(substr($ct['data_fim'] ?? '', 0, 10)) ?></td>
+                    <td class="fw-semibold"><?= e($c['numero']) ?></td>
                     <td>
-                        <?php
-                        echo match($ct['status'] ?? '') {
-                            'ativo'     => '<span class="badge bg-success">Ativo</span>',
-                            'encerrado' => '<span class="badge bg-secondary">Encerrado</span>',
-                            'cancelado' => '<span class="badge bg-danger">Cancelado</span>',
-                            default     => '<span class="badge bg-secondary">' . e($ct['status'] ?? '') . '</span>',
-                        };
-                        ?>
+                        <div><?= e($c['imovel_codigo']) ?></div>
+                        <div class="small text-muted"><?= e($c['imovel_titulo']) ?></div>
+                    </td>
+                    <td><?= e($c['locatario_nome']) ?></td>
+                    <td><?= format_money((float) $c['valor_aluguel']) ?></td>
+                    <td><?= format_date($c['data_inicio']) ?></td>
+                    <td><?= badge_status('contrato', $c['status']) ?></td>
+                    <td class="text-end">
+                        <a class="btn btn-sm btn-outline-primary" href="<?= e(base_url('contratos/detalhes.php?id=' . $c['id'])) ?>">Detalhes</a>
                     </td>
                 </tr>
-                <?php endforeach; ?>
+                <?php endforeach; endif; ?>
             </tbody>
         </table>
-        <?php endif; ?>
     </div>
 </div>
-
-<?php if ($totalPag > 1): ?>
-<nav class="mt-3">
-    <ul class="pagination pagination-sm justify-content-end">
-        <?php for ($p = 1; $p <= $totalPag; $p++): ?>
-        <li class="page-item <?= $p === $pagina ? 'active' : '' ?>">
-            <a class="page-link" href="?pagina=<?= $p ?>&status=<?= e($statusF) ?>"><?= $p ?></a>
-        </li>
-        <?php endfor; ?>
-    </ul>
-</nav>
-<?php endif; ?>
 
 <?php require ONECHECK_ROOT . '/includes/footer.php'; ?>

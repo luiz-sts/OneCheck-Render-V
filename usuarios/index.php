@@ -1,114 +1,73 @@
 <?php
+
 declare(strict_types=1);
+
 require_once dirname(__DIR__) . '/includes/bootstrap.php';
-require_once dirname(__DIR__) . '/config/api.php';
-require_once dirname(__DIR__) . '/includes/auth_api.php';
-api_require_login();
+Auth::requireRole('admin');
 
-$roleF  = $_GET['role'] ?? '';
-$pagina = max(1, (int)($_GET['pagina'] ?? 1));
+$user = Auth::user();
 
-$params = ['pagina' => $pagina, 'por_pagina' => 20];
-if ($roleF !== '') $params['role'] = $roleF;
+$usuarios = Database::pdo()->query(
+    'SELECT id, nome, email, perfil, ativo, mfa_enabled, mfa_obrigatorio, criado_em FROM usuarios ORDER BY nome'
+)->fetchAll();
 
-$res      = ApiClient::get('/usuarios', $params);
-$usuarios = $res['dados'] ?? [];
-$total    = $res['paginacao']['total'] ?? 0;
-$totalPag = (int) ceil($total / 20);
-
-$pageTitle  = 'Usuários';
+$pageTitle = 'Usuários';
 $activeMenu = 'usuarios';
 require ONECHECK_ROOT . '/includes/header.php';
+flash_render();
+page_header('Usuários', 'Equipe com acesso ao painel e ao app mobile',
+    '<a href="' . e(base_url('usuarios/novo.php')) . '" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Novo usuário</a>');
 ?>
 
-<div class="d-flex justify-content-between align-items-start mb-4">
-    <div class="oc-page-header mb-0">
-        <h2>Usuários</h2>
-        <p><?= $total ?> usuário(s) cadastrado(s)</p>
-    </div>
-    <a href="<?= e(base_url('usuarios/novo.php')) ?>" class="btn btn-primary btn-sm">
-        <i class="bi bi-plus-lg me-1"></i>Novo usuário
-    </a>
-</div>
-
-<div class="card mb-3">
-    <div class="card-body py-3">
-        <form class="row g-2 align-items-end" method="get">
-            <div class="col-md-4">
-                <label class="form-label">Perfil</label>
-                <select name="role" class="form-select form-select-sm">
-                    <option value="">Todos</option>
-                    <option value="admin"       <?= $roleF==='admin'       ? 'selected':'' ?>>Admin</option>
-                    <option value="vistoriador" <?= $roleF==='vistoriador' ? 'selected':'' ?>>Vistoriador</option>
-                    <option value="locatario"   <?= $roleF==='locatario'   ? 'selected':'' ?>>Locatário</option>
-                </select>
-            </div>
-            <div class="col-auto">
-                <button class="btn btn-primary btn-sm">Filtrar</button>
-                <a href="?" class="btn btn-outline-secondary btn-sm ms-1">Limpar</a>
-            </div>
-        </form>
-    </div>
-</div>
-
-<div class="card">
-    <div class="card-body p-0">
-        <?php if (!$usuarios): ?>
-        <div class="p-4" style="color:#6b7fa3;font-size:13px">
-            <i class="bi bi-people me-2"></i>Nenhum usuário encontrado.
-        </div>
-        <?php else: ?>
-        <table class="table table-hover mb-0">
-            <thead>
+<div class="card border-0 shadow-sm">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
                 <tr>
                     <th>Nome</th>
                     <th>E-mail</th>
                     <th>Perfil</th>
                     <th>MFA</th>
-                    <th>Cadastrado em</th>
+                    <th>Ativo</th>
+                    <th>Cadastro</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
                 <?php foreach ($usuarios as $u): ?>
                 <tr>
-                    <td><?= e($u['nome'] ?? '—') ?></td>
-                    <td style="font-size:12px"><?= e($u['email'] ?? '—') ?></td>
+                    <td class="fw-semibold"><?= e($u['nome']) ?></td>
+                    <td><?= e($u['email']) ?></td>
+                    <td><?= badge_status('perfil', $u['perfil']) ?></td>
                     <td>
-                        <?php
-                        echo match($u['role'] ?? '') {
-                            'admin'       => '<span class="badge bg-danger">Admin</span>',
-                            'vistoriador' => '<span class="badge bg-primary">Vistoriador</span>',
-                            'locatario'   => '<span class="badge bg-success">Locatário</span>',
-                            default       => '<span class="badge bg-secondary">' . e($u['role'] ?? '') . '</span>',
-                        };
-                        ?>
-                    </td>
-                    <td>
-                        <?php if ($u['mfa_ativo'] ?? false): ?>
-                            <span class="badge bg-success"><i class="bi bi-shield-check"></i> Ativo</span>
+                        <?php if ((int) ($u['mfa_enabled'] ?? 0)): ?>
+                        <span class="badge text-bg-success" title="MFA ativo">2FA</span>
+                        <?php elseif ((int) ($u['mfa_obrigatorio'] ?? 0)): ?>
+                        <span class="badge text-bg-warning text-dark">Pendente</span>
                         <?php else: ?>
-                            <span class="badge bg-secondary">Inativo</span>
+                        <span class="badge text-bg-light text-dark">—</span>
                         <?php endif; ?>
                     </td>
-                    <td style="font-size:12px;color:#6b7fa3"><?= e(substr($u['created_at'] ?? '', 0, 10)) ?></td>
+                    <td>
+                        <?php if ((int) $u['ativo']): ?>
+                        <span class="badge text-bg-success">Sim</span>
+                        <?php else: ?>
+                        <span class="badge text-bg-secondary">Não</span>
+                        <?php endif; ?>
+                    </td>
+                    <td class="small text-muted"><?= format_date($u['criado_em']) ?></td>
+                    <td class="text-end">
+                        <?php if ((int) $u['id'] === (int) $user['id']): ?>
+                        <a class="btn btn-sm btn-outline-secondary" href="<?= e(base_url('usuarios/perfil.php')) ?>">Meu perfil</a>
+                        <?php else: ?>
+                        <a class="btn btn-sm btn-outline-primary" href="<?= e(base_url('usuarios/editar.php?id=' . $u['id'])) ?>">Editar</a>
+                        <?php endif; ?>
+                    </td>
                 </tr>
                 <?php endforeach; ?>
             </tbody>
         </table>
-        <?php endif; ?>
     </div>
 </div>
-
-<?php if ($totalPag > 1): ?>
-<nav class="mt-3">
-    <ul class="pagination pagination-sm justify-content-end">
-        <?php for ($p = 1; $p <= $totalPag; $p++): ?>
-        <li class="page-item <?= $p === $pagina ? 'active' : '' ?>">
-            <a class="page-link" href="?pagina=<?= $p ?>&role=<?= e($roleF) ?>"><?= $p ?></a>
-        </li>
-        <?php endfor; ?>
-    </ul>
-</nav>
-<?php endif; ?>
 
 <?php require ONECHECK_ROOT . '/includes/footer.php'; ?>

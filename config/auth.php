@@ -8,5 +8,5 @@ return [
     'refresh_ttl' => 2592000,   // 30 dias
     'mfa_pending_ttl' => 300, // 5 min para concluir MFA após senha
     'mfa_issuer'  => 'OneCheck',
-    'perfis_mfa_obrigatorio' => [],
+    'perfis_mfa_obrigatorio' => ['admin', 'vistoriador'],
 ];

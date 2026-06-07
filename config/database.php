@@ -9,7 +9,7 @@ declare(strict_types=1);
 return [
     'host'     => getenv('ONECHECK_DB_HOST') ?: '127.0.0.1',
     // XAMPP neste PC usa porta 3307 (3306 costuma estar ocupada por outro MySQL)
-    'port'     => (int) (getenv('ONECHECK_DB_PORT') ?: 3306),
+    'port'     => (int) (getenv('ONECHECK_DB_PORT') ?: 3307),
     'database' => getenv('ONECHECK_DB_NAME') ?: 'onecheck',
     'username' => getenv('ONECHECK_DB_USER') ?: 'root',
     'password' => getenv('ONECHECK_DB_PASS') ?: '',

@@ -1,74 +1,99 @@
 <?php
+
 declare(strict_types=1);
+
 require_once dirname(__DIR__) . '/includes/bootstrap.php';
-require_once dirname(__DIR__) . '/config/api.php';
-require_once dirname(__DIR__) . '/includes/auth_api.php';
-api_require_login();
+Auth::requireLogin();
 
-// Problemas vêm vinculados a contratos — buscar todos contratos e listar problemas
-// API: GET /contratos/{id}/problemas
-// Por ora listamos os contratos e buscamos problemas de cada um
-$resContratos = ApiClient::get('/contratos', ['por_pagina' => 100]);
-$contratos    = $resContratos['dados'] ?? [];
+$pdo = Database::pdo();
+$statusF = $_GET['status'] ?? '';
+$prioridadeF = $_GET['prioridade'] ?? '';
 
-$problemas = [];
-foreach ($contratos as $ct) {
-    $resP = ApiClient::get('/contratos/' . $ct['id'] . '/problemas');
-    foreach (($resP['dados'] ?? []) as $p) {
-        $p['_contrato_id'] = $ct['id'];
-        $problemas[] = $p;
-    }
+$sql = 'SELECT p.*, i.codigo AS imovel_codigo, u.nome AS autor
+        FROM problemas p
+        INNER JOIN imoveis i ON i.id = p.imovel_id
+        INNER JOIN usuarios u ON u.id = p.criado_por
+        WHERE 1=1';
+$params = [];
+
+if ($statusF !== '') {
+    $sql .= ' AND p.status = ?';
+    $params[] = $statusF;
 }
+if ($prioridadeF !== '') {
+    $sql .= ' AND p.prioridade = ?';
+    $params[] = $prioridadeF;
+}
+$sql .= ' ORDER BY FIELD(p.prioridade, \'urgente\',\'alta\',\'media\',\'baixa\'), p.id DESC';
 
-$pageTitle  = 'Problemas';
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+$problemas = $stmt->fetchAll();
+
+$pageTitle = 'Problemas';
 $activeMenu = 'problemas';
 require ONECHECK_ROOT . '/includes/header.php';
+flash_render();
+page_header('Problemas', 'Pendências encontradas nas vistorias',
+    '<a href="' . e(base_url('problemas/novo.php')) . '" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Novo</a>');
 ?>
 
-<div class="d-flex justify-content-between align-items-start mb-4">
-    <div class="oc-page-header mb-0">
-        <h2>Problemas</h2>
-        <p><?= count($problemas) ?> problema(s) registrado(s)</p>
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-body py-3">
+        <form class="row g-2" method="get">
+            <div class="col-md-4">
+                <select name="status" class="form-select form-select-sm">
+                    <option value="">Status</option>
+                    <?php foreach (['aberto','em_analise','resolvido','cancelado'] as $s): ?>
+                    <option value="<?= e($s) ?>" <?= $statusF === $s ? 'selected' : '' ?>><?= e(str_replace('_', ' ', $s)) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <select name="prioridade" class="form-select form-select-sm">
+                    <option value="">Prioridade</option>
+                    <?php foreach (['urgente','alta','media','baixa'] as $p): ?>
+                    <option value="<?= e($p) ?>" <?= $prioridadeF === $p ? 'selected' : '' ?>><?= e(ucfirst($p)) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <button class="btn btn-primary btn-sm">Filtrar</button>
+            </div>
+        </form>
     </div>
 </div>
 
-<div class="card">
-    <div class="card-body p-0">
-        <?php if (!$problemas): ?>
-        <div class="p-4" style="color:#6b7fa3;font-size:13px">
-            <i class="bi bi-check-circle me-2" style="color:#22c55e"></i>Nenhum problema registrado.
-        </div>
-        <?php else: ?>
-        <table class="table table-hover mb-0">
-            <thead>
+<div class="card border-0 shadow-sm">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
                 <tr>
                     <th>Título</th>
-                    <th>Cômodo</th>
+                    <th>Imóvel</th>
+                    <th>Prioridade</th>
                     <th>Status</th>
-                    <th>Registrado em</th>
+                    <th>Registrado</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
-                <?php foreach ($problemas as $pr): ?>
+                <?php if (!$problemas): ?>
+                <tr><td colspan="6" class="text-center text-muted py-4">Nenhum problema.</td></tr>
+                <?php else: foreach ($problemas as $p): ?>
                 <tr>
-                    <td><?= e($pr['titulo'] ?? '—') ?></td>
-                    <td style="font-size:11px;color:#6b7fa3"><?= e(substr($pr['comodo_id'] ?? '', 0, 8)) ?>...</td>
-                    <td>
-                        <?php
-                        echo match($pr['status'] ?? '') {
-                            'aberto'       => '<span class="badge bg-danger">Aberto</span>',
-                            'em_andamento' => '<span class="badge bg-warning">Em andamento</span>',
-                            'resolvido'    => '<span class="badge bg-success">Resolvido</span>',
-                            default        => '<span class="badge bg-secondary">' . e($pr['status'] ?? '') . '</span>',
-                        };
-                        ?>
+                    <td class="fw-semibold"><?= e($p['titulo']) ?></td>
+                    <td><?= e($p['imovel_codigo']) ?></td>
+                    <td><?= badge_status('prioridade', $p['prioridade']) ?></td>
+                    <td><?= badge_status('problema', $p['status']) ?></td>
+                    <td class="small text-muted"><?= format_datetime($p['criado_em']) ?></td>
+                    <td class="text-end">
+                        <a class="btn btn-sm btn-outline-primary" href="<?= e(base_url('problemas/detalhes.php?id=' . $p['id'])) ?>">Ver</a>
                     </td>
-                    <td style="font-size:12px;color:#6b7fa3"><?= e(substr($pr['created_at'] ?? '', 0, 10)) ?></td>
                 </tr>
-                <?php endforeach; ?>
+                <?php endforeach; endif; ?>
             </tbody>
         </table>
-        <?php endif; ?>
     </div>
 </div>
 

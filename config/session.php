@@ -1,15 +1,11 @@
 <?php
-declare(strict_types=1);
 
-// Em produção (Render) usa HTTPS — secure = true
-$isProduction = !empty($_SERVER['HTTPS']) || 
-                (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https') ||
-                str_contains($_SERVER['HTTP_HOST'] ?? '', 'onrender.com');
+declare(strict_types=1);
 
 return [
     'name'     => 'ONECHECK_SESSID',
-    'lifetime' => 60 * 60 * 8,
-    'secure'   => $isProduction,
+    'lifetime' => 60 * 60 * 8, // 8 horas
+    'secure'   => false,       // true em produção com HTTPS
     'httponly' => true,
     'samesite' => 'Lax',
 ];

@@ -1,121 +1,116 @@
 <?php
+
 declare(strict_types=1);
+
 require_once dirname(__DIR__) . '/includes/bootstrap.php';
-require_once dirname(__DIR__) . '/config/api.php';
-require_once dirname(__DIR__) . '/includes/auth_api.php';
-api_require_login();
+Auth::requireLogin();
 
+$cfg = ImovelService::config();
+$pdo = Database::pdo();
+$busca = trim($_GET['q'] ?? '');
 $statusF = $_GET['status'] ?? '';
-$busca   = trim($_GET['q'] ?? '');
-$pagina  = max(1, (int)($_GET['pagina'] ?? 1));
 
-$params = ['pagina' => $pagina, 'por_pagina' => 20];
-if ($statusF !== '') $params['status'] = $statusF;
+$sql = 'SELECT i.*,
+        (SELECT COUNT(*) FROM vistorias v WHERE v.imovel_id = i.id) AS total_vistorias,
+        (SELECT COUNT(*) FROM imovel_comodos c WHERE c.imovel_id = i.id AND c.ativo = 1) AS total_comodos,
+        e.latitude, e.longitude
+        FROM imoveis i
+        LEFT JOIN enderecos e ON e.imovel_id = i.id AND e.principal = 1
+        WHERE 1=1';
+$params = [];
 
-$res      = ApiClient::get('/imoveis', $params);
-$imoveis  = $res['dados'] ?? [];
-$total    = $res['paginacao']['total'] ?? 0;
-$totalPag = (int) ceil($total / 20);
+if ($busca !== '') {
+    $sql .= ' AND (i.codigo LIKE ? OR i.titulo LIKE ? OR i.endereco LIKE ? OR i.cidade LIKE ?)';
+    $like = '%' . $busca . '%';
+    $params = array_merge($params, [$like, $like, $like, $like]);
+}
+if ($statusF !== '') {
+    $sql .= ' AND i.status = ?';
+    $params[] = $statusF;
+}
+$sql .= ' ORDER BY i.codigo ASC';
 
-$pageTitle  = 'Imóveis';
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+$imoveis = $stmt->fetchAll();
+
+$pageTitle = 'Imóveis';
 $activeMenu = 'imoveis';
 require ONECHECK_ROOT . '/includes/header.php';
+flash_render();
+page_header('Imóveis', 'Cadastro com endereço, cômodos e mapa',
+    '<a href="' . e(base_url('imoveis/mapa.php')) . '" class="btn btn-outline-primary btn-sm"><i class="bi bi-map me-1"></i>Mapa</a>'
+    . '<a href="' . e(base_url('imoveis/novo.php')) . '" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Novo imóvel</a>');
 ?>
 
-<div class="d-flex justify-content-between align-items-start mb-4">
-    <div class="oc-page-header mb-0">
-        <h2>Imóveis</h2>
-        <p><?= $total ?> imóvel(is) cadastrado(s)</p>
-    </div>
-    <div class="d-flex gap-2">
-        <a href="<?= e(base_url('imoveis/mapa.php')) ?>" class="btn btn-outline-secondary btn-sm">
-            <i class="bi bi-map me-1"></i>Mapa
-        </a>
-    </div>
-</div>
-
-<!-- Filtros -->
-<div class="card mb-3">
+<div class="card border-0 shadow-sm mb-3">
     <div class="card-body py-3">
         <form class="row g-2 align-items-end" method="get">
-            <div class="col-md-4">
-                <label class="form-label">Status</label>
+            <div class="col-md-5">
+                <label class="form-label small mb-1">Buscar</label>
+                <input type="text" name="q" class="form-control form-control-sm" placeholder="Código, título, endereço..."
+                       value="<?= e($busca) ?>">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small mb-1">Status (RF07)</label>
                 <select name="status" class="form-select form-select-sm">
                     <option value="">Todos</option>
-                    <option value="disponivel"  <?= $statusF==='disponivel'  ? 'selected':'' ?>>Disponível</option>
-                    <option value="locado"       <?= $statusF==='locado'       ? 'selected':'' ?>>Locado</option>
-                    <option value="em_vistoria"  <?= $statusF==='em_vistoria'  ? 'selected':'' ?>>Em vistoria</option>
+                    <?php foreach ($cfg['status'] as $val => $label): ?>
+                    <option value="<?= e($val) ?>" <?= $statusF === $val ? 'selected' : '' ?>><?= e($label) ?></option>
+                    <?php endforeach; ?>
                 </select>
             </div>
-            <div class="col-auto">
+            <div class="col-md-4">
                 <button class="btn btn-primary btn-sm">Filtrar</button>
-                <a href="?" class="btn btn-outline-secondary btn-sm ms-1">Limpar</a>
+                <a href="<?= e(base_url('imoveis/index.php')) ?>" class="btn btn-outline-secondary btn-sm">Limpar</a>
             </div>
         </form>
     </div>
 </div>
 
-<div class="card">
-    <div class="card-body p-0">
-        <?php if (!$imoveis): ?>
-        <div class="p-4" style="color:#6b7fa3;font-size:13px">
-            <i class="bi bi-building me-2"></i>Nenhum imóvel cadastrado na API ainda.
-        </div>
-        <?php else: ?>
-        <table class="table table-hover mb-0">
-            <thead>
+<div class="card border-0 shadow-sm">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
                 <tr>
-                    <th>ID</th>
-                    <th>Tipo</th>
-                    <th>Tamanho</th>
-                    <th>Garagem</th>
+                    <th>Código</th>
+                    <th>Título / Endereço</th>
+                    <th>m²</th>
                     <th>Status</th>
-                    <th>Cadastrado em</th>
-                    <th>Ações</th>
+                    <th>GPS</th>
+                    <th>Cômodos</th>
+                    <th></th>
                 </tr>
             </thead>
             <tbody>
-                <?php foreach ($imoveis as $im): ?>
+                <?php if (!$imoveis): ?>
+                <tr><td colspan="7" class="text-center text-muted py-4">Nenhum imóvel encontrado.</td></tr>
+                <?php else: foreach ($imoveis as $i): ?>
                 <tr>
-                    <td style="font-family:monospace;font-weight:500"><?= e(substr((string)($im['id'] ?? ''), -5)) ?></td>
-                    <td><?= e($im['tipo'] ?? '—') ?></td>
-                    <td><?= e($im['tamanho'] ?? '—') ?></td>
-                    <td><?= ($im['garagem'] ?? false) ? ($im['garagem_vagas'] ?? 1) . ' vaga(s)' : 'Não' ?></td>
+                    <td class="fw-semibold"><?= e($i['codigo']) ?></td>
                     <td>
-                        <?php
-                        echo match($im['status'] ?? '') {
-                            'locado'      => '<span class="badge bg-success">Locado</span>',
-                            'disponivel'  => '<span class="badge bg-primary">Disponível</span>',
-                            'em_vistoria' => '<span class="badge bg-warning">Em vistoria</span>',
-                            default       => '<span class="badge bg-secondary">' . e($im['status'] ?? '') . '</span>',
-                        };
-                        ?>
+                        <div><?= e($i['titulo']) ?></div>
+                        <div class="small text-muted"><?= e($i['endereco']) ?></div>
                     </td>
-                    <td style="font-size:12px;color:#6b7fa3"><?= e(substr($im['created_at'] ?? '', 0, 10)) ?></td>
-                    <td class="text-end">
-                        <a href="<?= e(base_url('imoveis/editar.php?id=' . $im['id'])) ?>"
-                           class="btn btn-outline-secondary btn-sm">
-                            <i class="bi bi-pencil"></i> Editar
-                        </a>
+                    <td class="small"><?= $i['tamanho_m2'] ? e((string) $i['tamanho_m2']) : '—' ?></td>
+                    <td><?= badge_status('imovel', $i['status']) ?></td>
+                    <td>
+                        <?php if ($i['latitude']): ?>
+                        <i class="bi bi-geo-alt-fill text-success" title="Com coordenadas"></i>
+                        <?php else: ?>
+                        <i class="bi bi-geo-alt text-muted" title="Sem GPS"></i>
+                        <?php endif; ?>
+                    </td>
+                    <td><?= (int) $i['total_comodos'] ?></td>
+                    <td class="text-end text-nowrap">
+                        <a class="btn btn-sm btn-outline-primary" href="<?= e(base_url('imoveis/detalhes.php?id=' . $i['id'])) ?>">Ver</a>
+                        <a class="btn btn-sm btn-outline-secondary" href="<?= e(base_url('imoveis/editar.php?id=' . $i['id'])) ?>">Editar</a>
                     </td>
                 </tr>
-                <?php endforeach; ?>
+                <?php endforeach; endif; ?>
             </tbody>
         </table>
-        <?php endif; ?>
     </div>
 </div>
-
-<?php if ($totalPag > 1): ?>
-<nav class="mt-3">
-    <ul class="pagination pagination-sm justify-content-end">
-        <?php for ($p = 1; $p <= $totalPag; $p++): ?>
-        <li class="page-item <?= $p === $pagina ? 'active' : '' ?>">
-            <a class="page-link" href="?pagina=<?= $p ?>&status=<?= e($statusF) ?>"><?= $p ?></a>
-        </li>
-        <?php endfor; ?>
-    </ul>
-</nav>
-<?php endif; ?>
 
 <?php require ONECHECK_ROOT . '/includes/footer.php'; ?>
